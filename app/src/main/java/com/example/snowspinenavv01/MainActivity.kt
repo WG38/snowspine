@@ -12,14 +12,11 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.Button
-import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat.getSystemService
 import com.google.android.gms.location.*
-import java.lang.Math.pow
 import kotlin.math.*
 import kotlin.properties.Delegates
 
@@ -34,6 +31,7 @@ class MainActivity : AppCompatActivity()  {
 
     // variables for heading accessing
     var headingHolder by Delegates.notNull<Float>() // stores the heading queried from onSensorChanged
+    var bearingHolder by Delegates.notNull<Float>() // stores the bearing queried from calculateHeadingDirection
     private lateinit var mSensorManager: SensorManager
     private lateinit var mCompass: Sensor
 
@@ -65,6 +63,7 @@ class MainActivity : AppCompatActivity()  {
         locArray = arrayOf(0.0,0.0)
         destinationArray = arrayOf(49.690888, 20.645186)
         headingHolder = 0f
+        bearingHolder = 0.1f
 
         //get initial location
         isLocationPermissionGranted()
@@ -77,11 +76,12 @@ class MainActivity : AppCompatActivity()  {
 
         }
 
+        isCameraPremissionGranted()
         //open camera (to be expanded later)
         enterCamera = findViewById(R.id.open_cam)
         enterCamera.setOnClickListener() {
-            val intent2 = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
-            startActivity(intent2)
+            val intent = Intent(this,CameraActivity::class.java)
+            startActivity(intent)
         }
 
         //get values from search menu
@@ -169,6 +169,31 @@ class MainActivity : AppCompatActivity()  {
         needle_img.rotation = -azi
         calculateHeadingDirection(locArray[0],locArray[1],headingHolder,destinationArray)
 
+    }
+
+    //permissions
+    private fun isCameraPremissionGranted(): Boolean {
+        return if (ActivityCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.CAMERA
+            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.CAMERA
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(
+                    android.Manifest.permission.CAMERA,
+                    android.Manifest.permission.CAMERA
+                ),1
+
+            )
+            false
+        } else {
+            true
+        }
     }
 
     private fun isLocationPermissionGranted(): Boolean {
@@ -272,7 +297,7 @@ class MainActivity : AppCompatActivity()  {
         current_location_text.text = "Current Location: $current_location_str"
         Log.d("FUCK5", latitude.toString())
         locArray = arrayOf<Double>(latitude,longitude)
-        calculateHeadingDirection(locArray[0],locArray[1],headingHolder,destinationArray)
+        bearingHolder = calculateHeadingDirection(locArray[0],locArray[1],headingHolder,destinationArray)
 
     }
     private fun startLocationUpdates() {
@@ -310,17 +335,18 @@ class MainActivity : AppCompatActivity()  {
     //what is its heading compared to north (where is it on the compass)
 
     @SuppressLint("SetTextI18n")
-    public fun calculateHeadingDirection(lat1: Double, lon1: Double, heading:Float, pointLoc : Array<Double>) {
+    public fun calculateHeadingDirection(lat1: Double, lon1: Double, heading:Float, pointLoc : Array<Double>) : Float {
         //distance
         val Radius = 6371e3// m
         val lat2 = pointLoc[0]
         val lon2 = pointLoc[1]
-        val phi1 = lat1 * Math.PI/180
-        val phi2 = lat2 * Math.PI/180
-        val lamb1 = lon1*Math.PI/180
-        val lamb2 = lon2*Math.PI/180
-        val delPhi = (lat2-lat1) * Math.PI/180
-        val delLamb = (lon2-lon1) * Math.PI/180
+        val mathPi = Math.PI/180
+        val phi1 = lat1 * mathPi
+        val phi2 = lat2 * mathPi
+        val lamb1 = lon1*mathPi
+        val lamb2 = lon2*mathPi
+        val delPhi = (lat2-lat1) * mathPi
+        val delLamb = (lon2-lon1) * mathPi
         val a = sin(delPhi / 2).pow(2.0) +
                 cos(phi1) * cos(phi2) * sin(delLamb / 2).pow(2.0)
 
@@ -344,6 +370,8 @@ class MainActivity : AppCompatActivity()  {
         val bear_img = findViewById<View>(R.id.target_pointer) as ImageView
         bear_img.rotation = - heading + bearing.toFloat()
 
+        return bearing.toFloat()
+
 
         //var current_location_str = latitude.toString() + " " + longitude.toString()
         //val current_location_text = findViewById<View>(R.id.loc_text) as TextView
@@ -354,6 +382,10 @@ class MainActivity : AppCompatActivity()  {
         val intent = Intent(this,TargetSearchMenu::class.java)
         startActivity(intent)
     }
+
+
+
+
 
 
 
