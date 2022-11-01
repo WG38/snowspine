@@ -15,8 +15,16 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.camera.view.SensorRotationListener
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.google.android.gms.location.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.math.*
 import kotlin.properties.Delegates
 
@@ -39,11 +47,15 @@ class MainActivity : AppCompatActivity()  {
     private lateinit var destinationArray : Array<Double>
 
     // variables for camera operation
-    private var CAMERA_REQUEST = 100
+    private lateinit var cameraExecutor: ExecutorService
 
     // variables for buttons
     private lateinit var enterLocMenu : Button
     private lateinit var enterCamera : Button
+
+    //rotation variables
+    //private lateinit var mAccelerometer : Sensor
+    private val rotationMatrix = FloatArray(9)
 
 
 
@@ -57,7 +69,8 @@ class MainActivity : AppCompatActivity()  {
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this!!)
         mSensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-        mCompass = mSensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION)
+        mCompass = mSensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        //mAccelerometer = mSensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION)
 
         //initialize current location,heading and destination variables
         locArray = arrayOf(0.0,0.0)
@@ -76,13 +89,12 @@ class MainActivity : AppCompatActivity()  {
 
         }
 
-        isCameraPremissionGranted()
+
         //open camera (to be expanded later)
-        enterCamera = findViewById(R.id.open_cam)
-        enterCamera.setOnClickListener() {
-            val intent = Intent(this,CameraActivity::class.java)
-            startActivity(intent)
-        }
+        isCameraPremissionGranted()
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        startCamera()
+
 
         //get values from search menu
         val intent = intent
@@ -117,6 +129,8 @@ class MainActivity : AppCompatActivity()  {
         super.onPause()
         stopLocationUpdates()
         mSensorManager.unregisterListener(sensorEventListener)
+        mSensorManager.unregisterListener(rotationEventListener)
+        cameraExecutor.shutdown()
 
     }
 
@@ -126,11 +140,23 @@ class MainActivity : AppCompatActivity()  {
         getLastKnownLocation()
         startLocationUpdates()
         mSensorManager.registerListener(sensorEventListener, mCompass, SensorManager.SENSOR_DELAY_NORMAL)
+        mSensorManager.registerListener(rotationEventListener,mCompass,SensorManager.SENSOR_DELAY_NORMAL)
+
+
 
 
 
 
     }
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+    }
+
+
+
+
+
 
     private var sensorEventListener = object : SensorEventListener {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -138,14 +164,32 @@ class MainActivity : AppCompatActivity()  {
         }
 
         override fun onSensorChanged(event: SensorEvent) {
-            val azimuth = Math.round(event.values[0]).toFloat()
-            DisplayHeading(azimuth)
+            if (event.sensor.type != Sensor.TYPE_ROTATION_VECTOR) return
+            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+            val azimuth = atan2(-rotationMatrix[2], -rotationMatrix[5]) //Math.round(event.values[0]).toFloat()
+            val degAzimuth = azimuth * 180/Math.PI
+            DisplayHeading(degAzimuth.toFloat())
             //Log.d("FUCK2", azimuth.toString())
 
         }
 
 
     }
+
+    private var rotationEventListener = object : SensorEventListener {
+        override fun onSensorChanged(p0: SensorEvent) {
+            val rotX = Math.round(p0.values[0]).toFloat()
+            val rotY = Math.round(p0.values[1]).toFloat()
+            val rotZ = Math.round(p0.values[2]).toFloat()
+            DisplayRotation(rotX,rotY,rotZ)
+        }
+
+        override fun onAccuracyChanged(p0: Sensor?, p1: Int) {
+
+        }
+
+   }
+
     //get magnetic heading
     //fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
@@ -168,7 +212,13 @@ class MainActivity : AppCompatActivity()  {
         val needle_img = findViewById<View>(R.id.comp_img) as ImageView
         needle_img.rotation = -azi
         calculateHeadingDirection(locArray[0],locArray[1],headingHolder,destinationArray)
+        displayTargetOnCam()
 
+    }
+    @SuppressLint("SetTextI18n")
+    private fun DisplayRotation(rotX:Float, rotY:Float, rotZ:Float) {
+        val current_rot_text = findViewById<View>(R.id.rot_text) as TextView
+        current_rot_text.text = "Rotation: $rotX , $rotY , $rotZ"
     }
 
     //permissions
@@ -384,6 +434,54 @@ class MainActivity : AppCompatActivity()  {
     }
 
 
+   //display camera
+   private fun startCamera() {
+       val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+       cameraProviderFuture.addListener({
+           // Used to bind the lifecycle of cameras to the lifecycle owner
+           val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+           // Preview
+           val preview = Preview.Builder()
+               .build()
+               .also {
+                   val viewFinder = findViewById<View>(R.id.viewFinder) as PreviewView
+                   it.setSurfaceProvider(viewFinder.surfaceProvider)
+               }
+
+           // Select back camera as a default
+           val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+           try {
+               // Unbind use cases before rebinding
+               cameraProvider.unbindAll()
+               // Bind use cases to camera
+               cameraProvider.bindToLifecycle(
+                   this, cameraSelector, preview
+               )
+
+           } catch (exc: Exception) {
+               Log.e("Yes", "Use case binding failed", exc)
+           }
+
+       }, ContextCompat.getMainExecutor(this))
+   }
+
+   //display the target sign only if heading is withing 10 degrees of bearing
+   private fun displayTargetOnCam()
+   {
+       val isTargetVisible = findViewById<View>(R.id.isTargetVisible) as ImageView
+       if (abs(headingHolder-bearingHolder) < 10) {
+
+           isTargetVisible.visibility = View.VISIBLE
+
+       }
+       else {
+           isTargetVisible.visibility = View.GONE
+       }
+
+   }
 
 
 
